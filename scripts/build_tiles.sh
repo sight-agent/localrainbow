@@ -32,7 +32,10 @@ docker run --rm -u 0:0 -v ${VOL_NAME}:/data curlimages/curl:8.6.0 \
 
 echo "[3/3] Building tiles (this can take many minutes)..."
 docker run --rm -v ${VOL_NAME}:/data ghcr.io/valhalla/valhalla:latest \
-  bash -lc "valhalla_build_config --mjolnir-tile-dir /data/tiles --mjolnir-tile-extract /data/italy-latest.osm.pbf --mjolnir-timezone /data/timezones.sqlite && valhalla_build_tiles -c /data/valhalla.json /data/italy-latest.osm.pbf && valhalla_build_admins -c /data/valhalla.json /data/italy-latest.osm.pbf"
+  bash -lc "mkdir -p /data/tiles \
+    && valhalla_build_config --mjolnir-tile-dir /data/tiles > /data/valhalla.json \
+    && valhalla_build_tiles -c /data/valhalla.json /data/italy-latest.osm.pbf \
+    && valhalla_build_admins -c /data/valhalla.json /data/italy-latest.osm.pbf"
 
 echo "Tiles built. Restarting stack..."
 docker compose restart valhalla
