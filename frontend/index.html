@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LocalRainbow — Isochrone</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    .panel {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 1000;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid rgba(0,0,0,0.1);
+      border-radius: 10px;
+      padding: 10px 12px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+      max-width: 260px;
+      font: 14px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+    }
+    .row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+    .row label { flex: 0 0 72px; opacity: 0.85; }
+    .row select, .row button { flex: 1; padding: 6px 8px; }
+    .status { margin-top: 6px; font-size: 12px; opacity: 0.85; }
+    .toast {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.85);
+      color: #fff;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font: 13px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+      z-index: 2000;
+      display: none;
+    }
+    .legend {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .bar {
+      height: 10px;
+      flex: 1;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #2b83ba 0%, #abdda4 50%, #fdae61 80%, #d7191c 100%);
+      border: 1px solid rgba(0,0,0,0.1);
+    }
+    .ticks { display:flex; justify-content: space-between; font-size: 11px; opacity: 0.8; margin-top: 3px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="panel">
+    <div class="row">
+      <label>Modo</label>
+      <select id="mode">
+        <option value="walk">walk</option>
+        <option value="bike">bike</option>
+        <option value="drive">drive</option>
+      </select>
+    </div>
+    <div class="row">
+      <button id="locate">Usa la mia posizione</button>
+    </div>
+    <div class="legend">
+      <span>0</span>
+      <div style="flex:1">
+        <div class="bar"></div>
+        <div class="ticks"><span>10</span><span>20</span><span>30</span></div>
+      </div>
+      <span>min</span>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+    const map = L.map('map', { zoomControl: true });
+    map.setView([41.9, 12.5], 5); // Italy-ish
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    const statusEl = document.getElementById('status');
+    const toastEl = document.getElementById('toast');
+    const modeEl = document.getElementById('mode');
+
+    function toast(msg) {
+      toastEl.textContent = msg;
+      toastEl.style.display = 'block';
+      clearTimeout(toastEl._t);
+      toastEl._t = setTimeout(() => toastEl.style.display = 'none', 3000);
+    }
+
+    function setStatus(msg) {
+      statusEl.textContent = msg || '';
+    }
+
+    let marker = null;
+    let layers = [];
+    function clearLayers() {
+      layers.forEach(l => map.removeLayer(l));
+      layers = [];
+    }
+
+    function colorFor(min) {
+      // cold -> warm
+      if (min <= 10) return '#2b83ba';
+      if (min <= 20) return '#abdda4';
+      if (min <= 30) return '#fdae61';
+      return '#d7191c';
+    }
+
+    function styleForContour(min) {
+      const major = (min === 10 || min === 20 || min === 30);
+      return {
+        color: major ? '#111' : '#000',
+        weight: major ? 2 : 1,
+        opacity: major ? 0.45 : 0.15,
+        fillColor: colorFor(min),
+        fillOpacity: major ? 0.18 : 0.10
+      };
+    }
+
+    // Maintain only the latest request.
+    let currentAbort = null;
+    let seq = 0;
+
+    async function fetchIsochrone(lat, lon, mode) {
+      seq += 1;
+      const mySeq = seq;
+      if (currentAbort) currentAbort.abort();
+      currentAbort = new AbortController();
+
+      setStatus('Caricamento…');
+
+      // Ask for more contours to approximate a gradient.
+      const minutes = [];
+      for (let m=2; m<=30; m+=2) minutes.push(m);
+
+      const res = await fetch('/v1/isochrone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: currentAbort.signal,
+        body: JSON.stringify({ lat, lon, mode, minutes })
+      });
+
+      if (mySeq !== seq) return null;
+
+      if (!res.ok) {
+        throw new Error('Server non raggiungibile');
+      }
+      return await res.json();
+    }
+
+    function renderIsochrone(geojson) {
+      clearLayers();
+
+      // Valhalla returns GeoJSON FeatureCollection with properties.contour
+      const feats = geojson && geojson.features ? geojson.features.slice() : [];
+
+      // draw from farthest to nearest (so near is on top)
+      feats.sort((a,b) => (b.properties.contour - a.properties.contour));
+
+      for (const f of feats) {
+        const min = f.properties && f.properties.contour;
+        const layer = L.geoJSON(f, { style: styleForContour(min) });
+        layer.addTo(map);
+        layers.push(layer);
+      }
+
+      setStatus('');
+    }
+
+    let debounceT = null;
+    function requestUpdate() {
+      if (!marker) return;
+      const { lat, lng } = marker.getLatLng();
+      const mode = modeEl.value;
+      clearTimeout(debounceT);
+      debounceT = setTimeout(async () => {
+        try {
+          const data = await fetchIsochrone(lat, lng, mode);
+          if (data) renderIsochrone(data);
+        } catch (e) {
+          if (e && e.name === 'AbortError') return;
+          setStatus('');
+          toast(e.message || 'Errore');
+        }
+      }, 180);
+    }
+
+    function setStart(latlng) {
+      if (!marker) {
+        marker = L.marker(latlng, { draggable: true }).addTo(map);
+        marker.on('dragend', requestUpdate);
+        marker.on('drag', () => setStatus(''));
+      } else {
+        marker.setLatLng(latlng);
+      }
+      requestUpdate();
+    }
+
+    map.on('click', (e) => setStart(e.latlng));
+
+    modeEl.addEventListener('change', requestUpdate);
+
+    document.getElementById('locate').addEventListener('click', () => {
+      if (!navigator.geolocation) {
+        toast('Geolocalizzazione non supportata');
+        return;
+      }
+      setStatus('Caricamento…');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setStatus('');
+          const latlng = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          map.setView([latlng.lat, latlng.lng], 13);
+          setStart(latlng);
+        },
+        () => {
+          setStatus('');
+          toast('Permesso negato');
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+services:
+  valhalla:
+    image: ghcr.io/valhalla/valhalla:latest
+    container_name: localrainbow-valhalla
+    restart: unless-stopped
+    # bind only to localhost; nginx will reach adapter, adapter reaches valhalla over docker network
+    ports:
+      - "127.0.0.1:8002:8002"
+    volumes:
+      - valhalla_tiles:/data
+    environment:
+      - tile_extract=/data/italy-latest.osm.pbf
+      - use_tiles_ignore_pbf=true
+      - build_elevation=false
+    # NOTE: tiles need to be built once into /data/tiles
+
+  adapter:
+    build: ./backend
+    container_name: localrainbow-adapter
+    restart: unless-stopped
+    environment:
+      - VALHALLA_URL=http://valhalla:8002
+    depends_on:
+      - valhalla
+    ports:
+      - "127.0.0.1:8001:8000"
+
+volumes:
+  valhalla_tiles:
