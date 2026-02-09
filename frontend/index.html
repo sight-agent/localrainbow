@@ -84,11 +84,17 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script>
-    const map = L.map('map', { zoomControl: true });
-    map.setView([41.9, 12.5], 5); // Italy-ish
+    const map = L.map('map', {
+      zoomControl: true,
+      // keep users focused on Italy
+      maxBounds: L.latLngBounds([35.3, 6.0], [47.4, 18.9]),
+      maxBoundsViscosity: 1.0
+    });
+    map.fitBounds([[35.3, 6.0], [47.4, 18.9]]);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
+      minZoom: 5,
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
