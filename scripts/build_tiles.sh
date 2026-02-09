@@ -18,7 +18,12 @@ TMP_C="$(docker create -v ${VOL_NAME}:/data alpine:3.19)"
 docker start -a "$TMP_C" >/dev/null 2>&1 || true
 # Use a second container with curl to download into the volume
 
-docker run --rm -v ${VOL_NAME}:/data curlimages/curl:8.6.0 \
+# Ensure permissions inside the volume allow writes from helper containers.
+# (Some images write as non-root; make volume world-writable for simplicity.)
+docker run --rm -v ${VOL_NAME}:/data alpine:3.19 sh -lc "chmod -R a+rwx /data || true"
+
+# Download PBF into the volume.
+docker run --rm -u 0:0 -v ${VOL_NAME}:/data curlimages/curl:8.6.0 \
   -L -o /data/italy-latest.osm.pbf \
   https://download.geofabrik.de/europe/italy-latest.osm.pbf
 
