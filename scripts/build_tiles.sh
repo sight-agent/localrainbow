@@ -34,7 +34,7 @@ echo "[3/3] Building tiles (this can take many minutes)..."
 docker run --rm -v ${VOL_NAME}:/data ghcr.io/valhalla/valhalla:latest \
   bash -lc "mkdir -p /data/tiles \
     && valhalla_build_config --mjolnir-tile-dir /data/tiles > /data/valhalla.json \
-    && valhalla_build_tiles -c /data/valhalla.json /data/italy-latest.osm.pbf \
+    && valhalla_build_tiles -c /data/valhalla.json -j 1 /data/italy-latest.osm.pbf \
     && valhalla_build_admins -c /data/valhalla.json /data/italy-latest.osm.pbf"
 
 echo "Tiles built. Restarting stack..."
